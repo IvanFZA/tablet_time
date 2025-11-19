@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tablet_time/pantallas/registroMedicamento.dart';
 import 'package:tablet_time/pantallas/registrofamiliar.dart';
 import 'package:tablet_time/pantallas/familiares.dart';
+import 'package:tablet_time/pantallas/modMedicamento.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
 
@@ -30,9 +31,11 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     return rows.map((m) => Treatment.fromMap(m)).toList();
   }
 
-  void _reload() {
-    setState(() => _futureTreatments = _loadTreatments());
-  }
+void _reload() {
+  setState(() {
+    _futureTreatments = _loadTreatments(); // Solo asigna, no se retorna el Future
+  });
+}
 
   void _toggleMenu() => setState(() => _isMenuOpen = !_isMenuOpen);
   void _closeMenu() {
@@ -46,6 +49,17 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     );
     if (result != null && mounted) _reload();
   }
+  Future<void> _goToEditMedication(Treatment t) async {
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => EditMedicationScreen(treatment: t),
+    ),
+  );
+  if (result == true && mounted) {
+    _reload(); // recarga la lista si se guardaron cambios
+  }
+}
 
   // ---------- ELIMINAR ----------
   Future<bool?> _confirmDelete(String name) {
@@ -65,6 +79,26 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
       ),
     );
   }
+
+  Future<bool?> _confirmEdit(String name) {
+  return showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Editar tratamiento'),
+      content: Text('¿Quieres editar "$name"?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Editar'),
+        ),
+      ],
+    ),
+  );
+}
 
   Future<void> _deleteTreatment(Treatment t) async {
     if (t.id == null) return;
@@ -165,18 +199,26 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
                             ),
                             confirmDismiss: (_) => _confirmDelete(displayName),
                             onDismissed: (_) async => _deleteTreatment(t),
-                            child: TreatmentCard(
-                              name: displayName,
-                              time: time,
-                              onDelete: t.id == null
-                                  ? null
-                                  : () async {
-                                      final ok = await _confirmDelete(displayName) ?? false;
-                                      if (ok) await _deleteTreatment(t);
-                                    },
-                              onEdit: () {
-                                // TODO: navegar a edición si lo necesitas
+
+                            // ⬇️ aquí envolvemos la tarjeta
+                            child: GestureDetector(
+                              onLongPress: () async {
+                                final ok = await _confirmEdit(displayName) ?? false;
+                                if (ok) {
+                                  await _goToEditMedication(t);
+                                }
                               },
+                              child: TreatmentCard(
+                                name: displayName,
+                                time: time,
+                                onDelete: t.id == null
+                                    ? null
+                                    : () async {
+                                        final ok = await _confirmDelete(displayName) ?? false;
+                                        if (ok) await _deleteTreatment(t);
+                                      },
+                                onEdit: () => _goToEditMedication(t),  // sigue funcionando el ícono de editar
+                              ),
                             ),
                           );
                         },

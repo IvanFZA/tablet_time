@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
+// 👇 importa el módulo donde muestras a los familiares
+import 'package:tablet_time/pantallas/familiares.dart';
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
@@ -40,7 +42,7 @@ class _FamilyFormScreenState extends State<FamilyFormScreen> {
     );
   }
 
-  // ⬇️ HAZ EL GUARDADO AQUÍ
+  // ⬇️ GUARDAR Y REDIRIGIR A LA LISTA
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -50,10 +52,17 @@ class _FamilyFormScreenState extends State<FamilyFormScreen> {
       email: _emailCtrl.text.trim(),
     );
 
-    final id = await AppDb.instance.insertFamily(fam.toMap());
+    await AppDb.instance.insertFamily(fam.toMap());
 
     if (!mounted) return;
-    Navigator.pop(context, id); // regresa el ID insertado
+
+    // En lugar de pop, redirigimos al módulo de familiares
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const FamilyListScreen(),
+      ),
+    );
   }
 
   @override
@@ -158,7 +167,7 @@ class _FamilyFormScreenState extends State<FamilyFormScreen> {
                           width: 220,
                           height: 48,
                           child: ElevatedButton(
-                            onPressed: _submit, // ⬅️ solo pasas la función
+                            onPressed: _submit,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kPrimaryBlue,
                               shape: RoundedRectangleBorder(
