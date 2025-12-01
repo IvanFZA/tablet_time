@@ -1,3 +1,4 @@
+// lib/pantallas/principal.dart
 import 'package:flutter/material.dart';
 import 'package:tablet_time/pantallas/registroMedicamento.dart';
 import 'package:tablet_time/pantallas/registrofamiliar.dart';
@@ -5,6 +6,8 @@ import 'package:tablet_time/pantallas/familiares.dart';
 import 'package:tablet_time/pantallas/modMedicamento.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
+import 'package:tablet_time/notificacion/notificacion.dart';
+import 'package:tablet_time/utils/dosis_utils.dart';
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
@@ -31,13 +34,14 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     return rows.map((m) => Treatment.fromMap(m)).toList();
   }
 
-void _reload() {
-  setState(() {
-    _futureTreatments = _loadTreatments(); // Solo asigna, no se retorna el Future
-  });
-}
+  void _reload() {
+    setState(() {
+      _futureTreatments = _loadTreatments();
+    });
+  }
 
   void _toggleMenu() => setState(() => _isMenuOpen = !_isMenuOpen);
+
   void _closeMenu() {
     if (_isMenuOpen) setState(() => _isMenuOpen = false);
   }
@@ -49,19 +53,21 @@ void _reload() {
     );
     if (result != null && mounted) _reload();
   }
-  Future<void> _goToEditMedication(Treatment t) async {
-  final result = await Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => EditMedicationScreen(treatment: t),
-    ),
-  );
-  if (result == true && mounted) {
-    _reload(); // recarga la lista si se guardaron cambios
-  }
-}
 
-  // ---------- ELIMINAR ----------
+  Future<void> _goToEditMedication(Treatment t) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditMedicationScreen(treatment: t),
+      ),
+    );
+    if (result == true && mounted) {
+      _reload();
+    }
+  }
+
+  // ---------- CONFIRMACIONES / ELIMINAR ----------
+
   Future<bool?> _confirmDelete(String name) {
     return showDialog<bool>(
       context: context,
@@ -69,7 +75,10 @@ void _reload() {
         title: const Text('Eliminar tratamiento'),
         content: Text('¿Quieres eliminar "$name"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
@@ -81,35 +90,42 @@ void _reload() {
   }
 
   Future<bool?> _confirmEdit(String name) {
-  return showDialog<bool>(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('Editar tratamiento'),
-      content: Text('¿Quieres editar "$name"?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Editar'),
-        ),
-      ],
-    ),
-  );
-}
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Editar tratamiento'),
+        content: Text('¿Quieres editar "$name"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Editar'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _deleteTreatment(Treatment t) async {
     if (t.id == null) return;
+
+    // 1) Cancelar notificación de ese tratamiento
+    await NotificationService.instance.cancelMedicationAlarm(t.id!);
+
+    // 2) Borrar de la BD
     await AppDb.instance.deleteTreatment(t.id!);
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Tratamiento eliminado')),
     );
     _reload();
   }
-  // ------------------------------
+
+  // ------------------------------ BUILD ------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -153,7 +169,9 @@ void _reload() {
                     future: _futureTreatments,
                     builder: (context, snap) {
                       if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
                       }
                       if (snap.hasError) {
                         return Center(
@@ -166,13 +184,19 @@ void _reload() {
                       final items = snap.data ?? [];
                       if (items.isEmpty) {
                         return ListView(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 24,
+                          ),
                           children: const [
                             SizedBox(height: 40),
                             Center(
                               child: Text(
                                 'No hay tratamientos registrados',
-                                style: TextStyle(fontSize: 18, color: Colors.black87),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.black87,
+                                ),
                               ),
                             ),
                           ],
@@ -180,12 +204,18 @@ void _reload() {
                       }
 
                       return ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 8,
+                        ),
                         itemCount: items.length,
                         itemBuilder: (context, i) {
                           final t = items[i];
-                          final displayName = '${t.medName}${t.dose.isNotEmpty ? ' ${t.dose}' : ''}';
-                          final time = t.hour ?? '--';
+                          final displayName =
+                              '${t.medName}${(t.dose.isNotEmpty) ? ' ${t.dose}' : ''}';
+
+                          // próxima hora de toma (texto) —> misma lógica que la alarma
+                          final nextTime = formatNextDoseTime(context, t);
 
                           // Swipe para borrar con confirmación
                           return Dismissible(
@@ -193,31 +223,36 @@ void _reload() {
                             direction: DismissDirection.endToStart,
                             background: Container(
                               alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
                               color: Colors.red.shade400,
-                              child: const Icon(Icons.delete, color: Colors.white),
+                              child: const Icon(Icons.delete,
+                                  color: Colors.white),
                             ),
                             confirmDismiss: (_) => _confirmDelete(displayName),
                             onDismissed: (_) async => _deleteTreatment(t),
 
-                            // ⬇️ aquí envolvemos la tarjeta
+                            // Mantener presionado para editar
                             child: GestureDetector(
                               onLongPress: () async {
-                                final ok = await _confirmEdit(displayName) ?? false;
+                                final ok =
+                                    await _confirmEdit(displayName) ?? false;
                                 if (ok) {
                                   await _goToEditMedication(t);
                                 }
                               },
                               child: TreatmentCard(
                                 name: displayName,
-                                time: time,
+                                time: nextTime, // próxima hora = hora de alarma
                                 onDelete: t.id == null
                                     ? null
                                     : () async {
-                                        final ok = await _confirmDelete(displayName) ?? false;
+                                        final ok =
+                                            await _confirmDelete(displayName) ??
+                                                false;
                                         if (ok) await _deleteTreatment(t);
                                       },
-                                onEdit: () => _goToEditMedication(t),  // sigue funcionando el ícono de editar
+                                onEdit: () => _goToEditMedication(t),
                               ),
                             ),
                           );
@@ -262,6 +297,7 @@ class _TopBar extends StatelessWidget {
             icon: const Icon(Icons.menu),
             color: Colors.white,
           ),
+          const Spacer(),
         ],
       ),
     );
@@ -297,7 +333,8 @@ class PositionedFillMenu extends StatelessWidget {
                     onClose();
                     await Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const FamilyFormScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const FamilyFormScreen()),
                     );
                   },
                 ),
@@ -307,7 +344,8 @@ class PositionedFillMenu extends StatelessWidget {
                     onClose();
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const FamilyListScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const FamilyListScreen()),
                     );
                   },
                 ),
@@ -418,7 +456,13 @@ class TreatmentCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -426,15 +470,26 @@ class TreatmentCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       time,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          IconButton(onPressed: onEdit, icon: const Icon(Icons.edit), color: kPrimaryBlue),
-          IconButton(onPressed: onDelete, icon: const Icon(Icons.delete), color: kPrimaryBlue),
+          IconButton(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit),
+            color: kPrimaryBlue,
+          ),
+          IconButton(
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete),
+            color: kPrimaryBlue,
+          ),
         ],
       ),
     );

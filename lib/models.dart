@@ -1,34 +1,49 @@
-// models.dart
+// lib/models.dart
+
+/// Modelo para la tabla FAMILY
 class Family {
   final int? id;
   final String name;
   final String phone;
   final String email;
 
-  Family({this.id, required this.name, required this.phone, required this.email});
+  Family({
+    this.id,
+    required this.name,
+    required this.phone,
+    required this.email,
+  });
 
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'phone': phone,
-        'email': email,
-      };
+  factory Family.fromMap(Map<String, dynamic> map) {
+    return Family(
+      id: map['id'] as int?,
+      name: map['name'] as String,
+      phone: map['phone'] as String,
+      email: map['email'] as String,
+    );
+  }
 
-  factory Family.fromMap(Map<String, dynamic> m) => Family(
-        id: m['id'] as int?,
-        name: m['name'] as String,
-        phone: m['phone'] as String,
-        email: m['email'] as String,
-      );
+  Map<String, dynamic> toMap() {
+    final map = <String, dynamic>{
+      'name': name,
+      'phone': phone,
+      'email': email,
+    };
+    if (id != null) {
+      map['id'] = id;
+    }
+    return map;
+  }
 }
 
+/// Modelo para la tabla TREATMENT
 class Treatment {
   final int? id;
   final String medName;
-  final String dose;
-  final String frequency;
-  final String duration;
-  final String? hour;
+  final String dose;      // NOT NULL en BD
+  final String frequency; // NOT NULL en BD (ej. "Cada 8 horas")
+  final String duration;  // NOT NULL en BD (ej. "7 días")
+  final String? hour;     // puede ser null (HH:mm)
 
   Treatment({
     this.id,
@@ -39,21 +54,48 @@ class Treatment {
     this.hour,
   });
 
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'med_name': medName,
-        'dose': dose,
-        'frequency': frequency,
-        'duration': duration,
-        'hour': hour,
-      };
+  factory Treatment.fromMap(Map<String, dynamic> map) {
+    return Treatment(
+      id: map['id'] as int?,
+      medName: map['med_name'] as String,
+      dose: map['dose'] as String,
+      frequency: map['frequency'] as String,
+      duration: map['duration'] as String,
+      hour: map['hour'] as String?, // puede venir null
+    );
+  }
 
-  factory Treatment.fromMap(Map<String, dynamic> m) => Treatment(
-        id: m['id'] as int?,
-        medName: m['med_name'] as String,
-        dose: m['dose'] as String,
-        frequency: m['frequency'] as String,
-        duration: m['duration'] as String,
-        hour: m['hour'] as String?,
-      );
+  Map<String, dynamic> toMap() {
+    final map = <String, dynamic>{
+      'med_name': medName,
+      'dose': dose,
+      'frequency': frequency,
+      'duration': duration,
+      'hour': hour,
+    };
+
+    if (id != null) {
+      map['id'] = id;
+    }
+    return map;
+  }
+
+  /// Opcional: para copiar con cambios (útil en futuras mejoras)
+  Treatment copyWith({
+    int? id,
+    String? medName,
+    String? dose,
+    String? frequency,
+    String? duration,
+    String? hour,
+  }) {
+    return Treatment(
+      id: id ?? this.id,
+      medName: medName ?? this.medName,
+      dose: dose ?? this.dose,
+      frequency: frequency ?? this.frequency,
+      duration: duration ?? this.duration,
+      hour: hour ?? this.hour,
+    );
+  }
 }

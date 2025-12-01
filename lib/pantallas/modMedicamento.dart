@@ -1,13 +1,14 @@
+// lib/pantallas/modMedicamento.dart
 import 'package:flutter/material.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
-
+import 'package:tablet_time/notificacion/notificacion.dart';
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
 
 class EditMedicationScreen extends StatefulWidget {
-  final Treatment treatment; // 👈 medicamento a editar
+  final Treatment treatment;
 
   const EditMedicationScreen({super.key, required this.treatment});
 
@@ -18,57 +19,180 @@ class EditMedicationScreen extends StatefulWidget {
 class _EditMedicationScreenState extends State<EditMedicationScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // Nombre
   final _nameController = TextEditingController();
-  final _doseController = TextEditingController();
-  final _freqController = TextEditingController();
-  final _durationController = TextEditingController();
-  String? _pickedHourString;
+
+  // Dosis: cantidad + unidad
+  final _doseAmountController = TextEditingController();
+  String _doseUnit = 'mg';
+
+  // Frecuencia: cada X (número) + unidad
+  final _freqValueController = TextEditingController();
+  String _freqUnit = 'horas';
+
+  // Duración: cantidad + unidad
+  final _durationAmountController = TextEditingController();
+  String _durationUnit = 'días';
+
+  // Hora seleccionada
+  TimeOfDay? _pickedTime;
+  String? _hourToStore; // "HH:mm"
 
   @override
   void initState() {
     super.initState();
+
     final t = widget.treatment;
+
+    // Nombre
     _nameController.text = t.medName;
-    _doseController.text = t.dose;
-    _freqController.text = t.frequency;
-    _durationController.text = t.duration;
-    _pickedHourString = t.hour;
+
+    // ---- Dosis: "500 mg" ----
+    if (t.dose.isNotEmpty) {
+      final idx = t.dose.indexOf(' ');
+      if (idx > 0) {
+        _doseAmountController.text = t.dose.substring(0, idx);
+        _doseUnit = t.dose.substring(idx + 1);
+      } else {
+        _doseAmountController.text = t.dose;
+      }
+    }
+
+    // ---- Frecuencia: "Cada 8 horas" ----
+    if (t.frequency.isNotEmpty) {
+      final parts = t.frequency.split(RegExp(r'\s+'));
+      // Esperamos ["Cada", "8", "horas"]
+      if (parts.length >= 3 && parts[0].toLowerCase() == 'cada') {
+        _freqValueController.text = parts[1];
+        _freqUnit = parts[2];
+      } else {
+        _freqControllerFallback(t.frequency);
+      }
+    }
+
+    // ---- Duración: "7 días" ----
+    if (t.duration.isNotEmpty) {
+      final idx = t.duration.indexOf(' ');
+      if (idx > 0) {
+        _durationAmountController.text = t.duration.substring(0, idx);
+        _durationUnit = t.duration.substring(idx + 1);
+      } else {
+        _durationAmountController.text = t.duration;
+      }
+    }
+
+    // ---- Hora ----
+    _hourToStore = t.hour;
+    if (_hourToStore != null) {
+      final regex = RegExp(r'(\d{1,2}):(\d{2})');
+      final match = regex.firstMatch(_hourToStore!);
+      if (match != null) {
+        final h = int.tryParse(match.group(1)!) ?? 0;
+        final m = int.tryParse(match.group(2)!) ?? 0;
+        _pickedTime = TimeOfDay(hour: h, minute: m);
+      }
+    }
+    _pickedTime ??= TimeOfDay.now();
+  }
+
+  // Si la frecuencia no viene con el formato "Cada X unidad", la tratamos como fallback
+  void _freqControllerFallback(String freqRaw) {
+    // Intento simple: si es solo un número, asumimos "horas"
+    final t = freqRaw.trim();
+    final numVal = int.tryParse(t);
+    if (numVal != null) {
+      _freqValueController.text = t;
+      _freqUnit = 'horas';
+    } else {
+      // último recurso: valor 8 horas
+      _freqValueController.text = '8';
+      _freqUnit = 'horas';
+    }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _doseController.dispose();
-    _freqController.dispose();
-    _durationController.dispose();
+    _doseAmountController.dispose();
+    _freqValueController.dispose();
+    _durationAmountController.dispose();
     super.dispose();
   }
 
-  InputDecoration _inputDecoration() {
-    return InputDecoration(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(20),
-        borderSide: const BorderSide(color: kPrimaryBlue, width: 2),
-      ),
-    );
-  }
-
   Future<void> _pickHour() async {
-    final now = TimeOfDay.now();
+    final initial = _pickedTime ?? TimeOfDay.now();
+
     final picked = await showTimePicker(
       context: context,
-      initialTime: now,
+      initialTime: initial,
     );
-    if (picked != null) {
-      final loc = MaterialLocalizations.of(context);
-      setState(() {
-        _pickedHourString = loc.formatTimeOfDay(picked);
-      });
+    if (picked != null && mounted) {
+      _pickedTime = picked;
+      _hourToStore =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+      setState(() {});
     }
+  }
+
+  /// Lógica compartida con el alta: calcula la próxima toma (DateTime local)
+  DateTime? _computeNextDoseDateTime(String? hourStr, String freqStr) {
+    if (hourStr == null || hourStr.trim().isEmpty) return null;
+
+    final regex = RegExp(r'(\d{1,2}):(\d{2})');
+    final match = regex.firstMatch(hourStr);
+    if (match == null) return null;
+
+    var h = int.tryParse(match.group(1)!) ?? 0;
+    final m = int.tryParse(match.group(2)!) ?? 0;
+
+    final lower = hourStr.toLowerCase();
+    final hasAm = lower.contains('am');
+    final hasPm = lower.contains('pm');
+
+    if (hasPm && h < 12) h += 12;
+    if (hasAm && h == 12) h = 0;
+
+    final now = DateTime.now();
+    DateTime start = DateTime(now.year, now.month, now.day, h, m);
+
+    int every = 0;
+    String unit = 'horas';
+
+    if (freqStr.isNotEmpty) {
+      final parts = freqStr.split(RegExp(r'\s+'));
+      if (parts.length >= 3 && parts[0].toLowerCase() == 'cada') {
+        every = int.tryParse(parts[1]) ?? 0;
+        unit = parts[2].toLowerCase();
+      }
+    }
+
+    if (every <= 0) {
+      if (start.isAfter(now)) return start;
+      return start.add(const Duration(hours: 1));
+    }
+
+    DateTime next;
+    if (start.isAfter(now)) {
+      next = start;
+    } else {
+      if (unit.startsWith('hora')) {
+        final diffHours = now.difference(start).inHours;
+        final intervals = (diffHours ~/ every) + 1;
+        next = start.add(Duration(hours: intervals * every));
+      } else if (unit.startsWith('día')) {
+        final diffDays = now.difference(start).inDays;
+        final intervals = (diffDays ~/ every) + 1;
+        next = start.add(Duration(days: intervals * every));
+      } else {
+        if (start.isAfter(now)) {
+          next = start;
+        } else {
+          next = start.add(const Duration(hours: 1));
+        }
+      }
+    }
+
+    return next;
   }
 
   Future<void> _save() async {
@@ -76,30 +200,48 @@ class _EditMedicationScreenState extends State<EditMedicationScreen> {
 
     try {
       final medName = _nameController.text.trim();
-      final dose = _doseController.text.trim();
-      final freq = _freqController.text.trim();
-      final duration = _durationController.text.trim();
-      final hour = _pickedHourString;
+
+      final doseAmount = _doseAmountController.text.trim();
+      final freqValue = _freqValueController.text.trim();
+      final durationAmount = _durationAmountController.text.trim();
+
+      final doseStr = '$doseAmount $_doseUnit';              // ej. "500 mg"
+      final freqStr = 'Cada $freqValue $_freqUnit';          // ej. "Cada 8 horas"
+      final durationStr = '$durationAmount $_durationUnit';  // ej. "7 días"
 
       final id = widget.treatment.id;
       if (id == null) {
-        // seguridad: no debería pasar, pero por si acaso
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No se encontró el ID del tratamiento')),
         );
         return;
       }
 
+      // 1) Actualizar en BD
       await AppDb.instance.updateTreatment(id, {
         'med_name': medName,
-        'dose': dose,
-        'frequency': freq,
-        'duration': duration,
-        'hour': hour,
+        'dose': doseStr,
+        'frequency': freqStr,
+        'duration': durationStr,
+        'hour': _hourToStore,
       });
 
+      // 2) Calcular nueva próxima dosis
+      final next = _computeNextDoseDateTime(_hourToStore, freqStr);
+
+      // 3) Reprogramar alarma si hay hora válida
+      if (next != null) {
+        await NotificationService.instance.scheduleMedicationAlarm(
+          id: id,
+          scheduledDate: next,
+          title: 'Es hora de tomar tu medicamento',
+          body: '$medName ($doseStr)',
+          payload: 'treatment|$id',  // 👈 igual
+        );
+      }
+
       if (!mounted) return;
-      Navigator.pop(context, true); // 👈 regreso true para que recargues la lista
+      Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -108,14 +250,65 @@ class _EditMedicationScreenState extends State<EditMedicationScreen> {
     }
   }
 
+  // ==== Estilos y UI (mismos del formulario de alta) ====
+
+  InputDecoration _dec({
+    required String hint,
+    String? helper,
+    IconData? icon,
+  }) {
+    return InputDecoration(
+      hintText: hint,
+      helperText: helper,
+      prefixIcon: icon != null ? Icon(icon, color: kPrimaryBlue) : null,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: const BorderSide(color: kPrimaryBlue, width: 2),
+      ),
+    );
+  }
+
+  InputDecoration _decNoIcon({String? hint}) {
+    return InputDecoration(
+      hintText: hint,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: kPrimaryBlue, width: 1.8),
+      ),
+    );
+  }
+
+  TextStyle get _labelStyle => const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        color: Colors.black87,
+      );
+
+  TextStyle get _smallBold => const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: Colors.black87,
+      );
+
   @override
   Widget build(BuildContext context) {
+    final loc = MaterialLocalizations.of(context);
+    final horaVisible = _pickedTime != null
+        ? loc.formatTimeOfDay(_pickedTime!)
+        : (_hourToStore ?? 'Selecciona una hora');
+
     return Scaffold(
       backgroundColor: kLightBackground,
       body: SafeArea(
         child: Column(
           children: [
-            // Barra superior
+            // Barra superior azul con botón X
             Container(
               height: 60,
               color: kPrimaryBlue,
@@ -131,163 +324,270 @@ class _EditMedicationScreenState extends State<EditMedicationScreen> {
               ),
             ),
 
-            // Formulario (mismo diseño que el de alta)
+            // Contenido (formulario)
             Expanded(
               child: SingleChildScrollView(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Editar medicamento',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w900,
-                            color: kPrimaryBlue,
-                          ),
+                child: Form(
+                  key: _formKey,
+                  autovalidateMode: AutovalidateMode.disabled,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Editar medicamento',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: kPrimaryBlue,
                         ),
-                        const SizedBox(height: 24),
+                      ),
+                      const SizedBox(height: 20),
 
-                        // Nombre
-                        const Text(
-                          'Nombre del medicamento:',
-                          style: TextStyle(fontSize: 16),
+                      // Nombre del medicamento
+                      Text('Nombre del medicamento:', style: _labelStyle),
+                      const SizedBox(height: 4),
+                      TextFormField(
+                        controller: _nameController,
+                        textInputAction: TextInputAction.next,
+                        decoration: _dec(
+                          hint: 'Ej. Paracetamol',
+                          helper: 'Escribe el nombre comercial o genérico',
+                          icon: Icons.medication_outlined,
                         ),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _nameController,
-                          decoration: _inputDecoration(),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Escribe el nombre del medicamento';
-                            }
-                            return null;
-                          },
-                          textInputAction: TextInputAction.next,
-                        ),
-                        const SizedBox(height: 16),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Escribe el nombre del medicamento'
+                            : null,
+                      ),
+                      const SizedBox(height: 14),
 
-                        // Dosis
-                        const Text('Dosis:', style: TextStyle(fontSize: 16)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _doseController,
-                          decoration: _inputDecoration(),
-                          validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Ingresa la dosis' : null,
-                          textInputAction: TextInputAction.next,
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Frecuencia
-                        const Text('Frecuencia:',
-                            style: TextStyle(fontSize: 16)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _freqController,
-                          decoration: _inputDecoration(),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Ingresa la frecuencia'
-                              : null,
-                          textInputAction: TextInputAction.next,
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Duración
-                        const Text('Duración:',
-                            style: TextStyle(fontSize: 16)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _durationController,
-                          decoration: _inputDecoration(),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Ingresa la duración'
-                              : null,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _save(),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Hora opcional
-                        const Text('Hora (opcional):',
-                            style: TextStyle(fontSize: 16)),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: _pickHour,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.black26),
-                              borderRadius: BorderRadius.circular(20),
-                              color: Colors.white,
+                      // Dosis
+                      Text('Dosis:', style: _labelStyle),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextFormField(
+                              controller: _doseAmountController,
+                              keyboardType: TextInputType.number,
+                              textInputAction: TextInputAction.next,
+                              decoration:
+                                  _decNoIcon(hint: 'Cantidad (ej. 500)'),
+                              style: _smallBold,
+                              validator: (v) {
+                                final txt = v?.trim() ?? '';
+                                if (txt.isEmpty) return 'Ingresa la cantidad';
+                                if (int.tryParse(txt) == null) {
+                                  return 'Sólo números';
+                                }
+                                return null;
+                              },
                             ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.alarm, color: kPrimaryBlue),
-                                const SizedBox(width: 10),
-                                Text(
-                                  _pickedHourString ?? 'Selecciona una hora',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: _pickedHourString == null
-                                        ? Colors.black54
-                                        : Colors.black87,
-                                  ),
-                                ),
-                                const Spacer(),
-                                const Icon(Icons.keyboard_arrow_down_rounded),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              value: _doseUnit,
+                              isDense: true,
+                              decoration: _decNoIcon(),
+                              style: _smallBold,
+                              iconSize: 20,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'mg', child: Text('mg')),
+                                DropdownMenuItem(
+                                    value: 'ml', child: Text('ml')),
+                                DropdownMenuItem(
+                                    value: 'gotas', child: Text('gotas')),
+                                DropdownMenuItem(
+                                    value: 'tableta(s)',
+                                    child: Text('tableta(s)')),
+                                DropdownMenuItem(
+                                    value: 'cápsula(s)',
+                                    child: Text('cápsula(s)')),
                               ],
+                              onChanged: (val) {
+                                if (val == null) return;
+                                setState(() => _doseUnit = val);
+                              },
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 32),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
 
-                        // Botón "Guardar cambios"
-                        Center(
-                          child: SizedBox(
-                            width: 200,
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: _save,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kPrimaryBlue,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
+                      // Frecuencia
+                      Text('Frecuencia:', style: _labelStyle),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text('Cada ', style: _smallBold),
+                          const SizedBox(width: 4),
+                          SizedBox(
+                            width: 70,
+                            child: TextFormField(
+                              controller: _freqValueController,
+                              keyboardType: TextInputType.number,
+                              textInputAction: TextInputAction.next,
+                              decoration: _decNoIcon(hint: '8'),
+                              style: _smallBold,
+                              validator: (v) {
+                                final txt = v?.trim() ?? '';
+                                if (txt.isEmpty) return 'Requerido';
+                                if (int.tryParse(txt) == null) {
+                                  return 'Número';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _freqUnit,
+                              isDense: true,
+                              decoration: _decNoIcon(),
+                              style: _smallBold,
+                              iconSize: 20,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'horas', child: Text('horas')),
+                                DropdownMenuItem(
+                                    value: 'días', child: Text('días')),
+                              ],
+                              onChanged: (val) {
+                                if (val == null) return;
+                                setState(() => _freqUnit = val);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Duración
+                      Text('Duración del tratamiento:', style: _labelStyle),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextFormField(
+                              controller: _durationAmountController,
+                              keyboardType: TextInputType.number,
+                              textInputAction: TextInputAction.done,
+                              decoration:
+                                  _decNoIcon(hint: 'Cantidad (ej. 7)'),
+                              style: _smallBold,
+                              validator: (v) {
+                                final txt = v?.trim() ?? '';
+                                if (txt.isEmpty) return 'Ingresa la cantidad';
+                                if (int.tryParse(txt) == null) {
+                                  return 'Sólo números';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              value: _durationUnit,
+                              isDense: true,
+                              decoration: _decNoIcon(),
+                              style: _smallBold,
+                              iconSize: 20,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'días', child: Text('días')),
+                                DropdownMenuItem(
+                                    value: 'semanas',
+                                    child: Text('semanas')),
+                                DropdownMenuItem(
+                                    value: 'meses', child: Text('meses')),
+                              ],
+                              onChanged: (val) {
+                                if (val == null) return;
+                                setState(() => _durationUnit = val);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Hora
+                      Text('Hora:', style: _labelStyle),
+                      const SizedBox(height: 4),
+                      InkWell(
+                        onTap: _pickHour,
+                        borderRadius: BorderRadius.circular(18),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.black26),
+                            borderRadius: BorderRadius.circular(18),
+                            color: Colors.white,
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.alarm, color: kPrimaryBlue),
+                              const SizedBox(width: 8),
+                              Text(
+                                horaVisible,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              child: const Text(
-                                'Guardar cambios',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
+                              const Spacer(),
+                              const Icon(Icons.keyboard_arrow_down_rounded),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+
+                      // Botón Guardar
+                      Center(
+                        child: SizedBox(
+                          width: 200,
+                          height: 46,
+                          child: ElevatedButton(
+                            onPressed: _save,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kPrimaryBlue,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                            ),
+                            child: const Text(
+                              'Guardar cambios',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
                               ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
 
             // Barra inferior azul
-            Container(
-              height: 24,
-              color: kPrimaryBlue,
-            ),
+            Container(height: 24, color: kPrimaryBlue),
           ],
         ),
       ),
