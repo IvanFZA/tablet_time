@@ -7,8 +7,8 @@ import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../rutas/navigation.dart'; // navigatorKey
-import '../db_helper.dart';         // 👈 BD
-import '../models.dart';            // 👈 Treatment
+import '../db_helper.dart';
+import '../models.dart';
 
 class NotificationService {
   NotificationService._();
@@ -22,13 +22,12 @@ class NotificationService {
   Future<void> init() async {
     if (_initialized) return;
 
-    // Inicializar base de zonas horarias
-    tzdata.initializeTimeZones();
+    debugPrint('🔔 init() NotificationService');
 
-    // Zona local
+    // Timezone
+    tzdata.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('America/Mexico_City'));
 
-    // Inicialización Android
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidInit);
 
@@ -38,18 +37,24 @@ class NotificationService {
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
-    // Pedir permiso de notificaciones (Android 13+)
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    // Permiso de notificaciones (Android 13+)
+    final androidImpl =
+        _plugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    await androidImpl?.requestNotificationsPermission();
+
+    // 👉 pedir permiso para EXACT ALARMS (Android 13/14)
+    try {
+      await androidImpl?.requestExactAlarmsPermission();
+    } catch (e) {
+      debugPrint('⚠️ requestExactAlarmsPermission lanzó excepción: $e');
+    }
 
     _initialized = true;
   }
 
-  /// =======================
-  /// NOTIFICACIÓN INMEDIATA
-  /// =======================
+  // =================== TEST INMEDIATA ===================
   Future<void> showInstantTestNotification() async {
     await init();
 
@@ -64,6 +69,8 @@ class NotificationService {
 
     const details = NotificationDetails(android: androidDetails);
 
+    debugPrint('🔔 Mostrando notificación inmediata de prueba');
+
     await _plugin.show(
       12345,
       'Prueba inmediata',
@@ -73,11 +80,11 @@ class NotificationService {
     );
   }
 
-  /// Callback cuando el usuario TOCA la notificación (app en foreground/background)
   void _onNotificationTap(NotificationResponse response) {
     final payload = response.payload;
+    debugPrint('📲 _onNotificationTap payload=$payload');
 
-    // 1) Si es un tratamiento, reprogramar siguiente dosis
+    // Reprogramar siguiente dosis si viene treatment
     if (payload != null && payload.startsWith('treatment|')) {
       final parts = payload.split('|');
       if (parts.length >= 2) {
@@ -88,22 +95,19 @@ class NotificationService {
       }
     }
 
-    // 2) Navegación a la pantalla de alarma (si quieres mostrar algo)
     navigatorKey.currentState?.pushNamed(
       '/alarm',
       arguments: payload,
     );
   }
 
-  /// Cuando se toca la notificación con la app terminada (según Android)
   @pragma('vm:entry-point')
   static void notificationTapBackground(NotificationResponse response) {
-    // Aquí podrías loguear algo si quieres
+    // Para logs de fondo si los necesitas
+    debugPrint('📲 notificationTapBackground payload=${response.payload}');
   }
 
-  /// ==========================
-  /// PROGRAMAR ALARMA (MEDS)
-  /// ==========================
+  // ================== PROGRAMAR ALARMA ==================
   Future<void> scheduleMedicationAlarm({
     required int id,
     required DateTime scheduledDate,
@@ -111,16 +115,15 @@ class NotificationService {
     required String body,
     String? payload,
   }) async {
-    await init(); // asegura init + zona horaria
+    await init();
 
     final now = DateTime.now();
     if (!scheduledDate.isAfter(now)) {
       debugPrint(
-          '⚠️ scheduledDate ($scheduledDate) no es futuro (now=$now). No se programa.');
+          '⚠️ NO se programa: fecha no es futura (scheduled=$scheduledDate, now=$now)');
       return;
     }
 
-    // Convertimos a TZDateTime usando la zona local
     final tzDate = tz.TZDateTime(
       tz.local,
       scheduledDate.year,
@@ -131,7 +134,8 @@ class NotificationService {
       scheduledDate.second,
     );
 
-    debugPrint('⏰ Programando alarma id=$id para $scheduledDate (tzDate=$tzDate)');
+    debugPrint(
+        '⏰ Programando alarma id=$id para $scheduledDate (tzDate=$tzDate)');
 
     const androidDetails = AndroidNotificationDetails(
       'meds_alarm_channel',
@@ -155,67 +159,56 @@ class NotificationService {
         details,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+
+        // 👉 AHORA USAMOS EXACT ALARM
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         payload: payload,
       );
+
+      debugPrint('✅ zonedSchedule OK (id=$id)');
     } on PlatformException catch (e) {
-      debugPrint('❌ Error programando alarma (inexact): $e');
+      debugPrint('❌ Error programando alarma (exact): $e');
     }
   }
 
-  /// Cancelar la alarma de un medicamento por id (si existe)
   Future<void> cancelMedicationAlarm(int id) async {
     await init();
     await _plugin.cancel(id);
   }
 
-  /// Cancelar todas las notificaciones
   Future<void> cancelAllAlarms() async {
     await init();
     await _plugin.cancelAll();
   }
 
-  /// Prueba: alarma en 10 segundos (puedes seguir usándola si quieres)
-  Future<void> scheduleTestAlarm() async {
+  // Para ver si realmente hay notificaciones pendientes
+  Future<void> debugPrintPending() async {
     await init();
-    final scheduled = DateTime.now().add(const Duration(seconds: 10));
-    await scheduleMedicationAlarm(
-      id: 999,
-      scheduledDate: scheduled,
-      title: 'Prueba de alarma',
-      body: 'Es hora de tomar tu medicamento de prueba',
-      payload: 'test|Prueba de medicamento',
-    );
+    final pending = await _plugin.pendingNotificationRequests();
+    debugPrint('🔎 Pending notifications (${pending.length}):');
+    for (final p in pending) {
+      debugPrint(
+          '  id=${p.id}, title=${p.title}, body=${p.body}, payload=${p.payload}');
+    }
   }
 
-  // ==========================================================
-  // CÁLCULO DE SIGUIENTE DOSIS A PARTIR DEL TRATAMIENTO (SIN UI)
-  // ==========================================================
-
+  // ========== Cálculo siguiente dosis ==========
   DateTime? _computeNextDoseDateTime(Treatment t) {
     final hourStr = t.hour;
-    if (hourStr == null || hourStr.trim().isEmpty) {
-      return null;
-    }
+    if (hourStr == null || hourStr.trim().isEmpty) return null;
 
-    // 1) Parsear "hh:mm"
     final regex = RegExp(r'(\d{1,2}):(\d{2})');
     final match = regex.firstMatch(hourStr);
-    if (match == null) {
-      return null;
-    }
+    if (match == null) return null;
 
     var h = int.tryParse(match.group(1)!) ?? 0;
     final m = int.tryParse(match.group(2)!) ?? 0;
 
     final lower = hourStr.toLowerCase();
-
-    final hasAm = lower.contains('am') ||
-        lower.contains('a. m') ||
-        lower.contains('a.m');
-    final hasPm = lower.contains('pm') ||
-        lower.contains('p. m') ||
-        lower.contains('p.m');
+    final hasAm =
+        lower.contains('am') || lower.contains('a. m') || lower.contains('a.m');
+    final hasPm =
+        lower.contains('pm') || lower.contains('p. m') || lower.contains('p.m');
 
     if (hasPm && h < 12) h += 12;
     if (hasAm && h == 12) h = 0;
@@ -223,7 +216,6 @@ class NotificationService {
     final now = DateTime.now();
     DateTime start = DateTime(now.year, now.month, now.day, h, m);
 
-    // 2) Parsear frecuencia "Cada 8 horas"
     final freqStr = t.frequency;
     int every = 0;
     String unit = 'horas';
@@ -237,15 +229,11 @@ class NotificationService {
     }
 
     if (every <= 0) {
-      if (start.isAfter(now)) {
-        return start;
-      } else {
-        return start.add(const Duration(days: 1));
-      }
+      if (start.isAfter(now)) return start;
+      return start.add(const Duration(days: 1));
     }
 
     DateTime next = start;
-
     if (start.isAfter(now)) {
       next = start;
     } else {
@@ -264,42 +252,39 @@ class NotificationService {
         }
       }
     }
-
     return next;
   }
 
-  /// Cargar tratamiento por ID, calcular su siguiente dosis y reprogramar alarma.
   Future<void> _scheduleNextDoseFromTreatment(int treatmentId) async {
-  try {
-    final map = await AppDb.instance.getTreatmentById(treatmentId);
-    if (map == null) {
-      debugPrint('⚠️ No se encontró tratamiento id=$treatmentId');
-      return;
+    try {
+      final map = await AppDb.instance.getTreatmentById(treatmentId);
+      if (map == null) {
+        debugPrint('⚠️ No se encontró tratamiento id=$treatmentId');
+        return;
+      }
+
+      final t = Treatment.fromMap(map);
+      final next = _computeNextDoseDateTime(t);
+      if (next == null) {
+        debugPrint(
+            '⚠️ No se pudo calcular siguiente dosis para id=$treatmentId');
+        return;
+      }
+
+      final title = 'Es hora de tomar tu medicamento';
+      final body = '${t.medName} (${t.dose})';
+
+      await scheduleMedicationAlarm(
+        id: t.id!,
+        scheduledDate: next,
+        title: title,
+        body: body,
+        payload: 'treatment|${t.id}',
+      );
+
+      debugPrint('✅ Reprogramada siguiente dosis de id=${t.id} para $next');
+    } catch (e) {
+      debugPrint('❌ Error reprogramando siguiente dosis: $e');
     }
-
-    final t = Treatment.fromMap(map);
-    final next = _computeNextDoseDateTime(t);
-    if (next == null) {
-      debugPrint('⚠️ No se pudo calcular siguiente dosis para id=$treatmentId');
-      return;
-    }
-
-    // 👇 AQUÍ aseguramos que el mensaje use nombre y dosis, NO el id
-    final title = 'Es hora de tomar tu medicamento';
-    final body = '${t.medName} (${t.dose})';
-
-    await scheduleMedicationAlarm(
-      id: t.id!,                 // <- esto es SOLO el identificador interno de la notificación
-      scheduledDate: next,
-      title: title,              // <- este es el título que ve el usuario
-      body: body,                // <- y este el cuerpo
-      payload: 'treatment|${t.id}',
-    );
-
-    debugPrint('✅ Reprogramada siguiente dosis de id=${t.id} para $next');
-  } catch (e) {
-    debugPrint('❌ Error reprogramando siguiente dosis: $e');
   }
-}
-
 }

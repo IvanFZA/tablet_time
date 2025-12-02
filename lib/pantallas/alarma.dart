@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
 import 'package:tablet_time/notificacion/notificacion.dart';
-import 'package:tablet_time/utils/dosis_utils.dart';
+import 'package:tablet_time/utils/dosis_utils.dart'; // si usas computeNextDoseDateTime aquí
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
 
 class AlarmScreen extends StatefulWidget {
-  final String? payload; // ej. "3|Paracetamol 500 mg" o "treatment|3"
+  final String? payload; // ej. "treatment|3|Paracetamol 500 mg (500 mg)" o "3|Paracetamol 500 mg"
 
   const AlarmScreen({super.key, this.payload});
 
@@ -33,18 +33,23 @@ class _AlarmScreenState extends State<AlarmScreen> {
     final payload = widget.payload;
     if (payload == null) return;
 
-    // Soportar dos formatos:
-    // 1) "treatment|3"
-    // 2) "3|Paracetamol 500 mg"
-    if (payload.startsWith('treatment|')) {
-      final parts = payload.split('|');
+    final parts = payload.split('|');
+    if (parts.isEmpty) return;
+
+    if (parts[0] == 'treatment') {
+      // Formato nuevo: "treatment|id|texto"
       if (parts.length >= 2) {
         _treatmentId = int.tryParse(parts[1]);
       }
-    } else if (payload.contains('|')) {
-      final parts = payload.split('|');
-      if (parts.length >= 2) {
+      if (parts.length >= 3) {
+        _medName = parts[2];
+      }
+    } else {
+      // Formato viejo: "id|texto"
+      if (parts.length >= 1) {
         _treatmentId = int.tryParse(parts[0]);
+      }
+      if (parts.length >= 2) {
         _medName = parts[1];
       }
     }
@@ -80,14 +85,17 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
   Future<void> _onTomarMedicamento() async {
     if (_treatment != null && _treatment!.id != null) {
+      // Usa tu utilidad de cálculo (si la tienes) o lógica interna
       final next = computeNextDoseDateTime(_treatment!);
       if (next != null) {
+        final displayText = '${_treatment!.medName} (${_treatment!.dose})';
+
         await NotificationService.instance.scheduleMedicationAlarm(
           id: _treatment!.id!,
           scheduledDate: next,
           title: 'Es hora de tomar tu medicamento',
-          body: '${_treatment!.medName} (${_treatment!.dose})',
-          payload: 'treatment|${_treatment!.id}',
+          body: displayText,
+          payload: 'treatment|${_treatment!.id}|$displayText',
         );
       }
     }
@@ -98,6 +106,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
   Future<void> _onPosponer() async {
     final id = _treatment?.id ?? _treatmentId ?? 1000;
     final name = _treatment?.medName ?? _medName;
+    final dose = _treatment?.dose ?? '';
+    final displayText = dose.isNotEmpty ? '$name ($dose)' : name;
 
     final now = DateTime.now();
     final newTime = now.add(const Duration(minutes: 5));
@@ -106,8 +116,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
       id: id,
       scheduledDate: newTime,
       title: 'Recordatorio pospuesto',
-      body: 'Es hora de tomar $name',
-      payload: 'treatment|$id',
+      body: 'Es hora de tomar $displayText',
+      payload: 'treatment|$id|$displayText',
     );
 
     _goBackToHome();
@@ -119,7 +129,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
       // Si el usuario presiona el botón físico "atrás"
       onWillPop: () async {
         _goBackToHome();
-        return false; // evitamos el pop normal
+        return false;
       },
       child: Scaffold(
         backgroundColor: kLightBackground,
