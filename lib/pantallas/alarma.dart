@@ -1,9 +1,9 @@
-// lib/pantallas/alarm_screen.dart
 import 'package:flutter/material.dart';
 import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
 import 'package:tablet_time/notificacion/notificacion.dart';
-import 'package:tablet_time/utils/dosis_utils.dart'; // si usas computeNextDoseDateTime aquí
+import 'package:tablet_time/utils/dosis_utils.dart';
+import 'package:telephony/telephony.dart';
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
@@ -18,10 +18,16 @@ class AlarmScreen extends StatefulWidget {
 }
 
 class _AlarmScreenState extends State<AlarmScreen> {
+  final Telephony _telephony = Telephony.instance;
+
   Treatment? _treatment;
   int? _treatmentId;
   String _medName = 'Medicamento';
   bool _loading = true;
+
+  // Datos del familiar (de la tabla family)
+  String? _familyName;
+  String? _familyPhone;
 
   @override
   void initState() {
@@ -58,34 +64,145 @@ class _AlarmScreenState extends State<AlarmScreen> {
   Future<void> _loadFromPayload() async {
     _parsePayload();
 
-    if (_treatmentId == null) {
+    // Cargar tratamiento
+    if (_treatmentId != null) {
+      final map = await AppDb.instance.getTreatmentById(_treatmentId!);
+      if (!mounted) return;
+
+      if (map != null) {
+        _treatment = Treatment.fromMap(map);
+        _medName = _treatment!.medName;
+      }
+    }
+
+    // Cargar familiar por defecto (primer registro de family)
+    final families = await AppDb.instance.getAllFamilies();
+    if (families.isNotEmpty) {
+      final fam = families.first;
+      _familyName = fam['name'] as String?;
+      _familyPhone = fam['phone'] as String?;
+    }
+
+    if (mounted) {
       setState(() {
         _loading = false;
       });
-      return;
     }
-
-    final map = await AppDb.instance.getTreatmentById(_treatmentId!);
-    if (!mounted) return;
-
-    if (map != null) {
-      _treatment = Treatment.fromMap(map);
-      _medName = _treatment!.medName;
-    }
-
-    setState(() {
-      _loading = false;
-    });
   }
 
   void _goBackToHome() {
-    // Regresa al home y destruye las pantallas anteriores
     Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
   }
 
+  // ========================
+  //   CONTACTO FAMILIAR
+  // ========================
+
+  String _getFamiliarName() {
+    return _familyName ?? 'Familiar';
+  }
+
+  String? _getFamiliarPhone() {
+    return _familyPhone;
+  }
+
+  String _horaActualTexto() {
+    final now = DateTime.now();
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  // ========================
+  //   SMS TOMAR
+  // ========================
+
+  Future<void> _enviarSmsTomado() async {
+    final telefono = _getFamiliarPhone();
+    if (telefono == null || telefono.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay teléfono del familiar configurado'),
+        ),
+      );
+      return;
+    }
+
+    final nombreFamiliar = _getFamiliarName();
+    final hora = _horaActualTexto();
+    final nombreMedicamento = _treatment?.medName ?? _medName;
+
+    final mensaje =
+        'Hola $nombreFamiliar, ya se ha tomado el medicamento $nombreMedicamento a las $hora.';
+
+    try {
+      await _telephony.sendSms(
+        to: telefono,
+        message: mensaje,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('SMS enviado: medicamento tomado')),
+      );
+    } catch (e) {
+      debugPrint('Error al enviar SMS tomado: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al enviar SMS')),
+      );
+    }
+  }
+
+  // ========================
+  //   SMS POSPUESTO (INMEDIATO)
+  // ========================
+
+Future<void> _programarSmsPospuesto() async {
+  final telefono = _getFamiliarPhone();
+  if (telefono == null || telefono.isEmpty) {
+    return;
+  }
+
+  final nombreFamiliar = _getFamiliarName();
+  final nombreMedicamento = _treatment?.medName ?? _medName;
+
+  // ✅ Guardamos la hora REAL en la que se presiona "Posponer"
+  final horaPospuesta = _horaActualTexto();
+
+  // ⏱️ Esperamos 5 minutos...
+  Future.delayed(const Duration(minutes: 5), () async {
+
+    // ✅ USAMOS LA HORA GUARDADA
+    final mensaje =
+        'Hola $nombreFamiliar, el medicamento '
+        '$nombreMedicamento fue pospuesto a las $horaPospuesta. '
+        'Por favor verifica que se lo haya tomado.';
+
+    try {
+      await Telephony.backgroundInstance.sendSms(
+        to: telefono,
+        message: mensaje,
+      );
+    } catch (e) {
+      debugPrint('Error al enviar SMS pospuesto: $e');
+    }
+
+  });
+}
+
+
+
+  // ========================
+  //   BOTONES
+  // ========================
+
   Future<void> _onTomarMedicamento() async {
+    // 1) Enviar SMS de "ya se tomó" (se ejecuta en el tap → más seguro)
+    await _enviarSmsTomado();
+
+    // 2) Reprogramar siguiente toma
     if (_treatment != null && _treatment!.id != null) {
-      // Usa tu utilidad de cálculo (si la tienes) o lógica interna
       final next = computeNextDoseDateTime(_treatment!);
       if (next != null) {
         final displayText = '${_treatment!.medName} (${_treatment!.dose})';
@@ -104,29 +221,33 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _onPosponer() async {
-    final id = _treatment?.id ?? _treatmentId ?? 1000;
-    final name = _treatment?.medName ?? _medName;
-    final dose = _treatment?.dose ?? '';
-    final displayText = dose.isNotEmpty ? '$name ($dose)' : name;
+  final id = _treatment?.id ?? _treatmentId ?? 1000;
+  final name = _treatment?.medName ?? _medName;
+  final dose = _treatment?.dose ?? '';
+  final displayText = dose.isNotEmpty ? '$name ($dose)' : name;
 
-    final now = DateTime.now();
-    final newTime = now.add(const Duration(minutes: 5));
+  final now = DateTime.now();
+  final newTime = now.add(const Duration(minutes: 5));
 
-    await NotificationService.instance.scheduleMedicationAlarm(
-      id: id,
-      scheduledDate: newTime,
-      title: 'Recordatorio pospuesto',
-      body: 'Es hora de tomar $displayText',
-      payload: 'treatment|$id|$displayText',
-    );
+  // 1) Reprogramas la notificación a +5 minutos
+  await NotificationService.instance.scheduleMedicationAlarm(
+    id: id,
+    scheduledDate: newTime,
+    title: 'Recordatorio pospuesto',
+    body: 'Es hora de tomar $displayText',
+    payload: 'treatment|$id|$displayText',
+  );
 
-    _goBackToHome();
-  }
+  // 2) Programas el SMS para dentro de 5 minutos
+  await _programarSmsPospuesto();
+
+  _goBackToHome();
+}
+
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      // Si el usuario presiona el botón físico "atrás"
       onWillPop: () async {
         _goBackToHome();
         return false;
@@ -240,8 +361,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
-                                      color: kPrimaryBlue,
-                                    ),
+                                      color: kPrimaryBlue),
                                   ),
                                 ),
                               ),
