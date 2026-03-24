@@ -95,6 +95,7 @@ class AppDb {
     final db = await database;
     return db.delete(tableFamily, where: 'id = ?', whereArgs: [id]);
   }
+  
 
   // ===========================
   // TREATMENT (Tratamientos)
