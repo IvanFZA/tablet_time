@@ -24,7 +24,11 @@ class Family {
   }
 
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{'name': name, 'phone': phone, 'email': email};
+    final map = <String, dynamic>{
+      'name': name,
+      'phone': phone,
+      'email': email,
+    };
     if (id != null) {
       map['id'] = id;
     }
@@ -36,10 +40,10 @@ class Family {
 class Treatment {
   final int? id;
   final String medName;
-  final String dose; // NOT NULL en BD
+  final String dose;      // NOT NULL en BD
   final String frequency; // NOT NULL en BD (ej. "Cada 8 horas")
-  final String duration; // NOT NULL en BD (ej. "7 días")
-  final String? hour; // puede ser null (HH:mm)
+  final String duration;  // NOT NULL en BD (ej. "7 días")
+  final String? hour;     // puede ser null (HH:mm)
 
   Treatment({
     this.id,

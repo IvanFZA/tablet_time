@@ -32,6 +32,64 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
     });
   }
 
+  Future<void> _deleteFamily(Family family) async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar familiar'),
+          content: Text(
+            '¿Deseas eliminar a ${family.name}?\n\nEsta acción no se puede deshacer.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text(
+                'Eliminar',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmado != true) return;
+
+    try {
+      if (family.id == null) {
+        throw Exception('El familiar no tiene id');
+      }
+
+      await AppDb.instance.deleteFamily(family.id!);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${family.name} fue eliminado correctamente'),
+        ),
+      );
+
+      await _reload();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al eliminar familiar: $e'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -39,10 +97,7 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Barra superior
             Container(height: 60, color: kPrimaryBlue),
-
-            // Contenido
             Expanded(
               child: FutureBuilder<List<Family>>(
                 future: _futureFamilies,
@@ -50,6 +105,7 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
+
                   if (snapshot.hasError) {
                     return Center(
                       child: Padding(
@@ -81,13 +137,15 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
                             ),
                           ),
                         ),
-
                         if (items.isEmpty) ...[
                           const SizedBox(height: 40),
                           Column(
                             children: const [
-                              Icon(Icons.group_outlined,
-                                  size: 62, color: kPrimaryBlue),
+                              Icon(
+                                Icons.group_outlined,
+                                size: 62,
+                                color: kPrimaryBlue,
+                              ),
                               SizedBox(height: 12),
                               Text(
                                 'No hay familiares registrados',
@@ -99,7 +157,11 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
                             ],
                           ),
                         ] else ...[
-                          for (final f in items) _FamilyCard(family: f),
+                          for (final f in items)
+                            _FamilyCard(
+                              family: f,
+                              onDelete: () => _deleteFamily(f),
+                            ),
                           const SizedBox(height: 20),
                         ],
                       ],
@@ -108,8 +170,6 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
                 },
               ),
             ),
-
-            // Botón regresar
             Container(
               color: kLightBackground,
               padding: const EdgeInsets.only(bottom: 16),
@@ -137,8 +197,6 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
                 ),
               ),
             ),
-
-            // Barra inferior
             Container(height: 24, color: kPrimaryBlue),
           ],
         ),
@@ -149,7 +207,12 @@ class _FamilyListScreenState extends State<FamilyListScreen> {
 
 class _FamilyCard extends StatelessWidget {
   final Family family;
-  const _FamilyCard({required this.family});
+  final VoidCallback onDelete;
+
+  const _FamilyCard({
+    required this.family,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -171,9 +234,23 @@ class _FamilyCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            family.name,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  family.name,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete, color: Colors.red),
+                tooltip: 'Eliminar familiar',
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(family.phone, style: const TextStyle(fontSize: 16)),

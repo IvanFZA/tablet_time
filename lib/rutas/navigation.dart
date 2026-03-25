@@ -11,14 +11,15 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 Route<dynamic>? appOnGenerateRoute(RouteSettings settings) {
   switch (settings.name) {
     case '/':
-      return MaterialPageRoute(builder: (_) => const TreatmentsScreen());
+      return MaterialPageRoute(
+        builder: (_) => const TreatmentsScreen(),
+      );
 
     case '/alarm':
       final payload = settings.arguments as String?;
-      return MaterialPageRoute(builder: (_) => AlarmScreen(payload: payload));
-
-    case '/history': // 👈 NUEVA RUTA
-      return MaterialPageRoute(builder: (_) => const HistoryScreen());
+      return MaterialPageRoute(
+        builder: (_) => AlarmScreen(payload: payload),
+      );
   }
   return null;
 }

@@ -9,8 +9,7 @@ const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
 
 class AlarmScreen extends StatefulWidget {
-  final String?
-  payload; // ej. "treatment|3|Paracetamol 500 mg (500 mg)" o "3|Paracetamol 500 mg"
+  final String? payload; // ej. "treatment|3|Paracetamol 500 mg (500 mg)" o "3|Paracetamol 500 mg"
 
   const AlarmScreen({super.key, this.payload});
 
@@ -138,7 +137,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
         'Hola $nombreFamiliar, ya se ha tomado el medicamento $nombreMedicamento a las $hora.';
 
     try {
-      await _telephony.sendSms(to: telefono, message: mensaje);
+      await _telephony.sendSms(
+        to: telefono,
+        message: mensaje,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('SMS enviado: medicamento tomado')),
@@ -146,9 +148,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
     } catch (e) {
       debugPrint('Error al enviar SMS tomado: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Error al enviar SMS')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al enviar SMS')),
+      );
     }
   }
 
@@ -157,48 +159,46 @@ class _AlarmScreenState extends State<AlarmScreen> {
   // ========================
 
   Future<void> _programarSmsPospuesto() async {
-    final telefono = _getFamiliarPhone();
-    if (telefono == null || telefono.isEmpty) {
-      return;
+  final telefono = _getFamiliarPhone();
+  if (telefono == null || telefono.isEmpty) {
+    return;
+  }
+
+  final nombreFamiliar = _getFamiliarName();
+  final nombreMedicamento = _treatment?.medName ?? _medName;
+
+  final horaPospuesta = _horaActualTexto();
+
+  Future.delayed(const Duration(minutes: 5), () async {
+    final mensaje =
+        'Hola $nombreFamiliar, el medicamento '
+        '$nombreMedicamento fue pospuesto a las $horaPospuesta. '
+        'Por favor verifica que se lo haya tomado.';
+
+    try {
+      await Telephony.backgroundInstance.sendSms(
+        to: telefono,
+        message: mensaje,
+      );
+    } catch (e) {
+      debugPrint('Error al enviar SMS pospuesto: $e');
     }
+  });
+}
 
-    final nombreFamiliar = _getFamiliarName();
-    final nombreMedicamento = _treatment?.medName ?? _medName;
+Future<void> _guardarHistorial(String action) async {
+  if (_treatmentId == null) return;
 
-    // ✅ Guardamos la hora REAL en la que se presiona "Posponer"
-    final horaPospuesta = _horaActualTexto();
+  final history = MedicationHistory(
+    treatmentId: _treatmentId!,
+    medName: _medName,
+    action: action,
+    date: DateTime.now().toIso8601String(),
+  );
 
-    // ⏱️ Esperamos 5 minutos...
-    Future.delayed(const Duration(minutes: 5), () async {
-      // ✅ USAMOS LA HORA GUARDADA
-      final mensaje =
-          'Hola $nombreFamiliar, el medicamento '
-          '$nombreMedicamento fue pospuesto a las $horaPospuesta. '
-          'Por favor verifica que se lo haya tomado.';
+  await AppDb.instance.insertHistory(history);
+}
 
-      try {
-        await Telephony.backgroundInstance.sendSms(
-          to: telefono,
-          message: mensaje,
-        );
-      } catch (e) {
-        debugPrint('Error al enviar SMS pospuesto: $e');
-      }
-    });
-  }
-
-  Future<void> _guardarHistorial(String action) async {
-    if (_treatmentId == null) return;
-
-    final history = MedicationHistory(
-      treatmentId: _treatmentId!,
-      medName: _medName,
-      action: action,
-      date: DateTime.now().toIso8601String(),
-    );
-
-    await AppDb.instance.insertHistory(history);
-  }
 
   // ========================
   //   BOTONES
@@ -228,27 +228,29 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _onPosponer() async {
-    await _guardarHistorial('snoozed'); // 👈 NUEVO
+  final id = _treatment?.id ?? _treatmentId ?? 1000;
+  final name = _treatment?.medName ?? _medName;
+  final dose = _treatment?.dose ?? '';
+  final displayText = dose.isNotEmpty ? '$name ($dose)' : name;
 
-    final id = _treatment?.id ?? _treatmentId ?? 1000;
-    final name = _treatment?.medName ?? _medName;
-    final dose = _treatment?.dose ?? '';
-    final displayText = dose.isNotEmpty ? '$name ($dose)' : name;
+  final now = DateTime.now();
+  final newTime = now.add(const Duration(minutes: 5));
 
-    final newTime = DateTime.now().add(const Duration(minutes: 5));
+  // 1) Reprogramas la notificación a +5 minutos
+  await NotificationService.instance.scheduleMedicationAlarm(
+    id: id,
+    scheduledDate: newTime,
+    title: 'Recordatorio pospuesto',
+    body: 'Es hora de tomar $displayText',
+    payload: 'treatment|$id|$displayText',
+  );
 
-    await NotificationService.instance.scheduleMedicationAlarm(
-      id: id,
-      scheduledDate: newTime,
-      title: 'Recordatorio pospuesto',
-      body: 'Es hora de tomar $displayText',
-      payload: 'treatment|$id|$displayText',
-    );
+  // 2) Programas el SMS para dentro de 5 minutos
+  await _programarSmsPospuesto();
 
-    await _programarSmsPospuesto();
+  _goBackToHome();
+}
 
-    _goBackToHome();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -292,17 +294,12 @@ class _AlarmScreenState extends State<AlarmScreen> {
                     : Center(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
+                              horizontal: 24, vertical: 16),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(
-                                Icons.alarm,
-                                size: 90,
-                                color: kPrimaryBlue,
-                              ),
+                              const Icon(Icons.alarm,
+                                  size: 90, color: kPrimaryBlue),
                               const SizedBox(height: 24),
                               const Text(
                                 'Es hora de tomar tu medicamento',
@@ -337,10 +334,8 @@ class _AlarmScreenState extends State<AlarmScreen> {
                                       borderRadius: BorderRadius.circular(30),
                                     ),
                                   ),
-                                  icon: const Icon(
-                                    Icons.check,
-                                    color: Colors.white,
-                                  ),
+                                  icon: const Icon(Icons.check,
+                                      color: Colors.white),
                                   label: const Text(
                                     'Tomar medicamento',
                                     style: TextStyle(
@@ -361,24 +356,19 @@ class _AlarmScreenState extends State<AlarmScreen> {
                                   onPressed: _onPosponer,
                                   style: OutlinedButton.styleFrom(
                                     side: const BorderSide(
-                                      color: kPrimaryBlue,
-                                      width: 2,
-                                    ),
+                                        color: kPrimaryBlue, width: 2),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(30),
                                     ),
                                   ),
-                                  icon: const Icon(
-                                    Icons.snooze,
-                                    color: kPrimaryBlue,
-                                  ),
+                                  icon: const Icon(Icons.snooze,
+                                      color: kPrimaryBlue),
                                   label: const Text(
                                     'Posponer 5 minutos',
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
-                                      color: kPrimaryBlue,
-                                    ),
+                                      color: kPrimaryBlue),
                                   ),
                                 ),
                               ),
@@ -388,7 +378,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
                       ),
               ),
 
-              Container(height: 24, color: kPrimaryBlue),
+              Container(
+                height: 24,
+                color: kPrimaryBlue,
+              ),
             ],
           ),
         ),

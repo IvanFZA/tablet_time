@@ -8,7 +8,6 @@ import 'package:tablet_time/db_helper.dart';
 import 'package:tablet_time/models.dart';
 import 'package:tablet_time/notificacion/notificacion.dart';
 import 'package:tablet_time/utils/dosis_utils.dart';
-import 'package:tablet_time/pantallas/history_screen.dart';
 
 const Color kPrimaryBlue = Color(0xFF0F7CC9);
 const Color kLightBackground = Color(0xFFE4F3FF);
@@ -24,10 +23,15 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
   bool _isMenuOpen = false;
   late Future<List<Treatment>> _futureTreatments;
 
+  Future<List<Treatment>> _loadTreatmentsSafe() async {
+    await AppDb.instance.deleteExpiredTreatments();
+    return _loadTreatments();
+  }
+
   @override
   void initState() {
     super.initState();
-    _futureTreatments = _loadTreatments();
+    _futureTreatments = _loadTreatmentsSafe();
   }
 
   Future<List<Treatment>> _loadTreatments() async {
@@ -35,9 +39,9 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     return rows.map((m) => Treatment.fromMap(m)).toList();
   }
 
-  void _reload() {
+  Future<void> _reload() async {
     setState(() {
-      _futureTreatments = _loadTreatments();
+      _futureTreatments = _loadTreatmentsSafe();
     });
   }
 
@@ -58,7 +62,9 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
   Future<void> _goToEditMedication(Treatment t) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => EditMedicationScreen(treatment: t)),
+      MaterialPageRoute(
+        builder: (_) => EditMedicationScreen(treatment: t),
+      ),
     );
     if (result == true && mounted) {
       _reload();
@@ -168,7 +174,9 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
                     future: _futureTreatments,
                     builder: (context, snap) {
                       if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
                       }
                       if (snap.hasError) {
                         return Center(
@@ -220,14 +228,11 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
                             direction: DismissDirection.endToStart,
                             background: Container(
                               alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
                               color: Colors.red.shade400,
-                              child: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                              ),
+                              child: const Icon(Icons.delete,
+                                  color: Colors.white),
                             ),
                             confirmDismiss: (_) => _confirmDelete(displayName),
                             onDismissed: (_) async => _deleteTreatment(t),
@@ -249,7 +254,7 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
                                     : () async {
                                         final ok =
                                             await _confirmDelete(displayName) ??
-                                            false;
+                                                false;
                                         if (ok) await _deleteTreatment(t);
                                       },
                                 onEdit: () => _goToEditMedication(t),
@@ -331,8 +336,7 @@ class PositionedFillMenu extends StatelessWidget {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const FamilyFormScreen(),
-                      ),
+                          builder: (_) => const FamilyFormScreen()),
                     );
                   },
                 ),
@@ -343,8 +347,7 @@ class PositionedFillMenu extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const FamilyListScreen(),
-                      ),
+                          builder: (_) => const FamilyListScreen()),
                     );
                   },
                 ),
