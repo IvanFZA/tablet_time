@@ -158,7 +158,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
   //   SMS POSPUESTO (INMEDIATO)
   // ========================
 
-  Future<void> _programarSmsPospuesto() async {
+Future<void> _programarSmsPospuesto() async {
   final telefono = _getFamiliarPhone();
   if (telefono == null || telefono.isEmpty) {
     return;
@@ -167,9 +167,13 @@ class _AlarmScreenState extends State<AlarmScreen> {
   final nombreFamiliar = _getFamiliarName();
   final nombreMedicamento = _treatment?.medName ?? _medName;
 
+  // ✅ Guardamos la hora REAL en la que se presiona "Posponer"
   final horaPospuesta = _horaActualTexto();
 
+  // ⏱️ Esperamos 5 minutos...
   Future.delayed(const Duration(minutes: 5), () async {
+
+    // ✅ USAMOS LA HORA GUARDADA
     final mensaje =
         'Hola $nombreFamiliar, el medicamento '
         '$nombreMedicamento fue pospuesto a las $horaPospuesta. '
@@ -183,21 +187,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
     } catch (e) {
       debugPrint('Error al enviar SMS pospuesto: $e');
     }
+
   });
 }
 
-Future<void> _guardarHistorial(String action) async {
-  if (_treatmentId == null) return;
-
-  final history = MedicationHistory(
-    treatmentId: _treatmentId!,
-    medName: _medName,
-    action: action,
-    date: DateTime.now().toIso8601String(),
-  );
-
-  await AppDb.instance.insertHistory(history);
-}
 
 
   // ========================
@@ -205,10 +198,10 @@ Future<void> _guardarHistorial(String action) async {
   // ========================
 
   Future<void> _onTomarMedicamento() async {
-    await _guardarHistorial('taken'); // 👈 NUEVO
-
+    // 1) Enviar SMS de "ya se tomó" (se ejecuta en el tap → más seguro)
     await _enviarSmsTomado();
 
+    // 2) Reprogramar siguiente toma
     if (_treatment != null && _treatment!.id != null) {
       final next = computeNextDoseDateTime(_treatment!);
       if (next != null) {

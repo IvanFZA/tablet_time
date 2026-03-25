@@ -124,9 +124,9 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     await AppDb.instance.deleteTreatment(t.id!);
 
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Tratamiento eliminado')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Tratamiento eliminado')),
+    );
     _reload();
   }
 
@@ -273,7 +273,10 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
             ),
 
             if (_isMenuOpen)
-              PositionedFillMenu(width: width, onClose: _closeMenu),
+              PositionedFillMenu(
+                width: width,
+                onClose: _closeMenu,
+              ),
           ],
         ),
       ),
@@ -351,16 +354,6 @@ class PositionedFillMenu extends StatelessWidget {
                     );
                   },
                 ),
-                /*_MenuButton(
-                  text: 'Historial de medicamentos',
-                  onTap: () {
-                    onClose();
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HistoryScreen()),
-                    );
-                  },
-                ),*/
               ],
             ),
           ),
@@ -381,7 +374,11 @@ class _MenuButton extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
 
-  const _MenuButton({super.key, required this.text, required this.onTap});
+  const _MenuButton({
+    super.key,
+    required this.text,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -455,7 +452,7 @@ class TreatmentCard extends StatelessWidget {
             blurRadius: 4,
             offset: const Offset(0, 2),
             color: Colors.black.withOpacity(0.08),
-          ),
+          )
         ],
       ),
       child: Row(

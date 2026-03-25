@@ -1,7 +1,6 @@
 // db_helper.dart
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import '../models.dart';
 import 'package:tablet_time/notificacion/notificacion.dart';
 
 class AppDb {
@@ -56,23 +55,9 @@ class AppDb {
           );
         ''');
 
-        await db.execute('''
-          CREATE TABLE medication_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            treatment_id INTEGER,
-            med_name TEXT,
-            action TEXT, -- "taken" o "snoozed"
-            date TEXT
-          )
-          ''');
-
         // Índices útiles
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_family_name ON $tableFamily(name);',
-        );
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_treatment_med ON $tableTreatment(med_name);',
-        );
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_family_name ON $tableFamily(name);');
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_treatment_med ON $tableTreatment(med_name);');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -96,15 +81,10 @@ class AppDb {
     final db = await database;
     return db.query(tableFamily, orderBy: 'name ASC');
   }
-    //SQL Injection /consultas parametrizadas
+
   Future<Map<String, dynamic>?> getFamilyById(int id) async {
     final db = await database;
-    final rows = await db.query(
-      tableFamily,
-      where: 'id = ?',
-      whereArgs: [id],
-      limit: 1,
-    );
+    final rows = await db.query(tableFamily, where: 'id = ?', whereArgs: [id], limit: 1);
     return rows.isNotEmpty ? rows.first : null;
   }
 
@@ -134,12 +114,7 @@ class AppDb {
 
   Future<Map<String, dynamic>?> getTreatmentById(int id) async {
     final db = await database;
-    final rows = await db.query(
-      tableTreatment,
-      where: 'id = ?',
-      whereArgs: [id],
-      limit: 1,
-    );
+    final rows = await db.query(tableTreatment, where: 'id = ?', whereArgs: [id], limit: 1);
     return rows.isNotEmpty ? rows.first : null;
   }
 
@@ -207,17 +182,13 @@ Future<void> deleteExpiredTreatments() async {
   // ===========================
   Future<int> countFamilies() async {
     final db = await database;
-    final res = Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM $tableFamily'),
-    )!;
+    final res = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $tableFamily'))!;
     return res;
   }
 
   Future<int> countTreatments() async {
     final db = await database;
-    final res = Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM $tableTreatment'),
-    )!;
+    final res = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $tableTreatment'))!;
     return res;
   }
 
@@ -236,49 +207,6 @@ Future<void> deleteExpiredTreatments() async {
     final path = join(dbPath, _dbName);
     await deleteDatabase(path);
     _db = null; // fuerza re-inicialización en la próxima llamada
-  }
-  // ===========================
-  // HISTORIAL DE MEDICAMENTOS
-  // ===========================
-
-  Future<void> insertHistory(MedicationHistory history) async {
-    final db = await database;
-    await db.insert('medication_history', history.toMap());
-  }
-
-  Future<List<Map<String, dynamic>>> getHistory() async {
-    final db = await database;
-    return await db.query('medication_history', orderBy: 'date DESC');
-  }
-
-  //DATOS DE PRUEBA DE HISTORE SOLO PARA PRUEBA (quítalo después)
-  Future<void> insertFakeHistory() async {
-    final db = await database;
-
-    await db.insert('medication_history', {
-      'treatment_id': 1,
-      'med_name': 'Paracetamol 500 mg',
-      'action': 'taken',
-      'date': DateTime.now().toIso8601String(),
-    });
-
-    await db.insert('medication_history', {
-      'treatment_id': 2,
-      'med_name': 'Ibuprofeno 400 mg',
-      'action': 'snoozed',
-      'date': DateTime.now()
-          .subtract(const Duration(minutes: 10))
-          .toIso8601String(),
-    });
-
-    await db.insert('medication_history', {
-      'treatment_id': 3,
-      'med_name': 'Amoxicilina 250 mg',
-      'action': 'taken',
-      'date': DateTime.now()
-          .subtract(const Duration(hours: 1))
-          .toIso8601String(),
-    });
   }
 }
 

@@ -1,9 +1,8 @@
 // lib/rutas/navigation.dart
 import 'package:flutter/material.dart';
 
-import 'package:tablet_time/pantallas/principal.dart'; // TreatmentsScreen
-import 'package:tablet_time/pantallas/alarma.dart'; // AlarmScreen
-import 'package:tablet_time/pantallas/history_screen.dart';
+import 'package:tablet_time/pantallas/principal.dart';      // TreatmentsScreen
+import 'package:tablet_time/pantallas/alarma.dart';   // AlarmScreen
 
 /// Llave global para navegar desde NotificationService
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
