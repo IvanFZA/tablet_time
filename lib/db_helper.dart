@@ -1,13 +1,14 @@
 // db_helper.dart
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:tablet_time/notificacion/notificacion.dart';
 
 class AppDb {
   AppDb._();
   static final AppDb instance = AppDb._();
 
   static const String _dbName = 'meds_local.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 2;
 
   static const String tableFamily = 'family';
   static const String tableTreatment = 'treatment';
@@ -49,7 +50,8 @@ class AppDb {
             dose TEXT NOT NULL,
             frequency TEXT NOT NULL,
             duration TEXT NOT NULL,
-            hour TEXT
+            hour TEXT,
+            start_date TEXT NOT NULL
           );
         ''');
 
@@ -58,11 +60,11 @@ class AppDb {
         await db.execute('CREATE INDEX IF NOT EXISTS idx_treatment_med ON $tableTreatment(med_name);');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // Aquí escribes migraciones cuando subas _dbVersion
-        // Ejemplo:
-        // if (oldVersion < 2) {
-        //   await db.execute('ALTER TABLE $tableTreatment ADD COLUMN notes TEXT;');
-        // }
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE $tableTreatment ADD COLUMN start_date TEXT'
+          );
+        }
       },
     );
   }
@@ -127,6 +129,53 @@ class AppDb {
     final db = await database;
     return db.delete(tableTreatment, where: 'id = ?', whereArgs: [id]);
   }
+Future<void> deleteExpiredTreatments() async {
+  final db = await database;
+  final rows = await db.query(tableTreatment);
+  final now = DateTime.now();
+
+  for (final row in rows) {
+    final id = row['id'] as int?;
+    final startDateStr = row['start_date'] as String?;
+    final durationStr = row['duration'] as String?;
+
+    if (id == null || startDateStr == null || durationStr == null) {
+      continue;
+    }
+
+    final startDate = DateTime.tryParse(startDateStr);
+    if (startDate == null) continue;
+
+    final match = RegExp(r'\d+').firstMatch(durationStr);
+    if (match == null) continue;
+
+    final durationValue = int.tryParse(match.group(0)!);
+    if (durationValue == null) continue;
+
+    final durationText = durationStr.toLowerCase();
+
+    DateTime endDate;
+
+    if (durationText.contains('semana')) {
+      endDate = startDate.add(Duration(days: durationValue * 7));
+    } else if (durationText.contains('mes')) {
+      endDate = startDate.add(Duration(days: durationValue * 30));
+    } else {
+      endDate = startDate.add(Duration(days: durationValue));
+    }
+
+    if (now.isAfter(endDate)) {
+      await NotificationService.instance.cancelMedicationAlarm(id);
+
+      await db.delete(
+        tableTreatment,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+}
+
 
   // ===========================
   // Utilidades (dev / debug)
@@ -160,3 +209,4 @@ class AppDb {
     _db = null; // fuerza re-inicialización en la próxima llamada
   }
 }
+

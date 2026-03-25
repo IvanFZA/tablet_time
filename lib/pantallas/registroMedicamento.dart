@@ -128,52 +128,50 @@ class _MedicationFormScreenState extends State<MedicationFormScreen> {
     return next;
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+Future<void> _save() async {
+  if (!_formKey.currentState!.validate()) return;
 
-    try {
-      final name = _nameController.text.trim();
-      final doseAmount = _doseAmountController.text.trim();
-      final freqValue = _freqValueController.text.trim();
-      final durationAmount = _durationAmountController.text.trim();
+  try {
+    final name = _nameController.text.trim();
+    final doseAmount = _doseAmountController.text.trim();
+    final freqValue = _freqValueController.text.trim();
+    final durationAmount = _durationAmountController.text.trim();
 
-      final doseStr = '$doseAmount $_doseUnit';              // ej. "500 mg"
-      final freqStr = 'Cada $freqValue $_freqUnit';          // ej. "Cada 8 horas"
-      final durationStr = '$durationAmount $_durationUnit';  // ej. "7 días"
+    final doseStr = '$doseAmount $_doseUnit';
+    final freqStr = 'Cada $freqValue $_freqUnit';
+    final durationStr = '$durationAmount $_durationUnit';
 
-      final tr = Treatment(
-        medName: name,
-        dose: doseStr,
-        frequency: freqStr,
-        duration: durationStr,
-        hour: _hourToStore, // 👈 SIEMPRE "HH:mm"
-      );
+    final treatmentData = {
+      'med_name': name,
+      'dose': doseStr,
+      'frequency': freqStr,
+      'duration': durationStr,
+      'hour': _hourToStore,
+      'start_date': DateTime.now().toIso8601String(),
+    };
 
-      // Guardar en BD
-      final id = await AppDb.instance.insertTreatment(tr.toMap());
+    final id = await AppDb.instance.insertTreatment(treatmentData);
 
-      // Programar alarma si tenemos hora y frecuencia válidas
-      final next = _computeNextDoseDateTime(_hourToStore, freqStr);
-      if (id != null && next != null) {
-        
-        await NotificationService.instance.scheduleMedicationAlarm(
-          id: id,
-          scheduledDate: next,
-          title: 'Es hora de tomar tu medicamento',
-          body: '$name ($doseStr)',
-          payload: 'treatment|$id',  // 👈 importante
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.pop(context, id);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar: $e')),
+    final next = _computeNextDoseDateTime(_hourToStore, freqStr);
+    if (next != null) {
+      await NotificationService.instance.scheduleMedicationAlarm(
+        id: id,
+        scheduledDate: next,
+        title: 'Es hora de tomar tu medicamento',
+        body: '$name ($doseStr)',
+        payload: 'treatment|$id',
       );
     }
+
+    if (!mounted) return;
+    Navigator.pop(context, id);
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al guardar: $e')),
+    );
   }
+}
 
   InputDecoration _dec({
     required String hint,

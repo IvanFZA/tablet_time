@@ -23,10 +23,15 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
   bool _isMenuOpen = false;
   late Future<List<Treatment>> _futureTreatments;
 
+  Future<List<Treatment>> _loadTreatmentsSafe() async {
+    await AppDb.instance.deleteExpiredTreatments();
+    return _loadTreatments();
+  }
+
   @override
   void initState() {
     super.initState();
-    _futureTreatments = _loadTreatments();
+    _futureTreatments = _loadTreatmentsSafe();
   }
 
   Future<List<Treatment>> _loadTreatments() async {
@@ -34,9 +39,9 @@ class _TreatmentsScreenState extends State<TreatmentsScreen> {
     return rows.map((m) => Treatment.fromMap(m)).toList();
   }
 
-  void _reload() {
+  Future<void> _reload() async {
     setState(() {
-      _futureTreatments = _loadTreatments();
+      _futureTreatments = _loadTreatmentsSafe();
     });
   }
 
