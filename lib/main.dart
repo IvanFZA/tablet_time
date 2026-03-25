@@ -1,12 +1,20 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
-import 'pantallas/principal.dart'; // Asegúrate de que aquí está TreatmentsScreen
-import 'db_helper.dart';          // opcional: para precalentar la BD
+import 'pantallas/principal.dart';
+import 'pantallas/alarma.dart';
+import 'notificacion/notificacion.dart';
+import 'rutas/navigation.dart'; // 👈 aquí ahora vive navigatorKey
+import 'package:telephony/telephony.dart';
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Opcional: abre/crea la BD al inicio (útil para evitar latencia en la 1ª pantalla)
-  await AppDb.instance.database;
+  // Inicializas notificaciones
+  await NotificationService.instance.init();
+
+  // Pides permisos de SMS / teléfono
+  final Telephony telephony = Telephony.instance;
+  await telephony.requestPhoneAndSmsPermissions;
 
   runApp(const MyApp());
 }
@@ -17,14 +25,17 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey, // 👈 la misma llave
       debugShowCheckedModeBanner: false,
       title: 'Tratamientos',
-      theme: ThemeData(
-        useMaterial3: false,
-        primaryColor: const Color(0xFF0F7CC9),
-        scaffoldBackgroundColor: const Color(0xFFE4F3FF),
-      ),
-      home: const TreatmentsScreen(), // la pantalla que moviste a principal.dart
+      initialRoute: '/',
+      routes: {
+        '/': (_) => const TreatmentsScreen(),
+        '/alarm': (ctx) {
+          final payload = ModalRoute.of(ctx)!.settings.arguments as String?;
+          return AlarmScreen(payload: payload);
+        },
+      },
     );
   }
 }
